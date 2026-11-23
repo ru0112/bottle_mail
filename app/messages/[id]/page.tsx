@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import type { MessageThreadEntry } from "@/lib/messages";
+import { getDailyMessageUsage } from "@/lib/daily-message-limits";
 import { isAuthSessionMissingError } from "@/lib/supabase/auth-errors";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -70,5 +71,7 @@ async function MessageThreadContent({
     notFound();
   }
 
-  return <MessageThread entries={entries} />;
+  const dailyUsage = await getDailyMessageUsage(supabase);
+
+  return <MessageThread dailyUsage={dailyUsage} entries={entries} />;
 }

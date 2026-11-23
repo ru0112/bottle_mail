@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { createMessageReplyAction } from "@/app/actions/messages";
+import {
+  DAILY_MESSAGE_LIMIT,
+  getRemainingDailyActions,
+} from "@/lib/daily-message-limits";
+import type { DailyMessageUsage } from "@/lib/daily-message-limits";
 import type { MessageThreadEntry } from "@/lib/messages";
 import {
   getMessageLength,
@@ -14,6 +19,7 @@ import {
 import { canPostReply } from "@/lib/thread-rules";
 
 type MessageThreadProps = {
+  dailyUsage: DailyMessageUsage;
   entries: MessageThreadEntry[];
 };
 
@@ -21,22 +27,47 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "原因を特定できませんでした。";
 }
 
-export default function MessageThread({ entries }: MessageThreadProps) {
+export default function MessageThread({
+  dailyUsage: initialDailyUsage,
+  entries,
+}: MessageThreadProps) {
   const router = useRouter();
   const [content, setContent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [optimisticReplyResetAt, setOptimisticReplyResetAt] = useState<
+    string | null
+  >(null);
   const messageId = entries[0].message_id;
   const replyCount = entries.length - 1;
   const lastEntry = entries[entries.length - 1];
   const canReply = canPostReply(replyCount, lastEntry.speaker);
   const contentLength = getMessageLength(content);
   const contentValidationError = getMessageValidationError(content, "返信");
+  const remainingReplies = getRemainingDailyActions(
+    initialDailyUsage.reply_count +
+      Number(optimisticReplyResetAt === initialDailyUsage.resets_at),
+  );
+
+  useEffect(() => {
+    if (remainingReplies !== 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => router.refresh(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [remainingReplies, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmedContent = content.trim();
-    if (!canReply || !trimmedContent || contentValidationError || isSending) {
+    if (
+      !canReply ||
+      remainingReplies === 0 ||
+      !trimmedContent ||
+      contentValidationError ||
+      isSending
+    ) {
       return;
     }
 
@@ -44,10 +75,12 @@ export default function MessageThread({ entries }: MessageThreadProps) {
     setIsSending(true);
     try {
       await createMessageReplyAction(messageId, content);
+      setOptimisticReplyResetAt(initialDailyUsage.resets_at);
       setContent("");
       router.refresh();
     } catch (caughtError) {
       setError(`返信を送信できませんでした。${errorMessage(caughtError)}`);
+      router.refresh();
     } finally {
       setIsSending(false);
     }
@@ -88,6 +121,10 @@ export default function MessageThread({ entries }: MessageThreadProps) {
           <p className="mt-3 text-sm text-slate-300/65">
             返信は交互に最大3回まで送れます。
           </p>
+          <p className="mt-2 text-xs text-cyan-100/70" role="status">
+            本日の返信: 残り {remainingReplies}/{DAILY_MESSAGE_LIMIT} 回
+            （JST 0時にリセット）
+          </p>
 
           <ol className="mt-8 space-y-4">
             {entries.map((entry, index) => (
@@ -123,6 +160,13 @@ export default function MessageThread({ entries }: MessageThreadProps) {
               role="status"
             >
               やり取り終了
+            </p>
+          ) : remainingReplies === 0 ? (
+            <p
+              className="mt-6 rounded-xl border border-cyan-100/15 bg-cyan-100/[0.04] px-5 py-4 text-center text-sm text-cyan-50/75"
+              role="status"
+            >
+              本日の返信上限に達しました。JST 0時にリセットされます。
             </p>
           ) : !canReply ? (
             <p
@@ -174,7 +218,10 @@ export default function MessageThread({ entries }: MessageThreadProps) {
                 <button
                   type="submit"
                   disabled={
-                    isSending || Boolean(contentValidationError) || !canReply
+                    isSending ||
+                    Boolean(contentValidationError) ||
+                    !canReply ||
+                    remainingReplies === 0
                   }
                   className="send-button rounded-xl px-5 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
                 >

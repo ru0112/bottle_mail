@@ -3,8 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const supabaseMocks = vi.hoisted(() => ({
   createSupabaseServerClient: vi.fn(),
   getUser: vi.fn(),
-  from: vi.fn(),
-  insert: vi.fn(),
   rpc: vi.fn(),
 }));
 
@@ -27,26 +25,32 @@ describe("message server actions", () => {
       data: { user: { id: userId } },
       error: null,
     });
-    supabaseMocks.insert.mockResolvedValue({ error: null });
-    supabaseMocks.from.mockReturnValue({ insert: supabaseMocks.insert });
     supabaseMocks.rpc.mockResolvedValue({ data: null, error: null });
     supabaseMocks.createSupabaseServerClient.mockResolvedValue({
       auth: { getUser: supabaseMocks.getUser },
-      from: supabaseMocks.from,
       rpc: supabaseMocks.rpc,
     });
   });
 
-  it("accepts a 200-character post and stores it for the authenticated user", async () => {
+  it("accepts a 200-character post through the database-enforced RPC", async () => {
     const content = "あ".repeat(200);
 
     await createMessageAction(content);
 
-    expect(supabaseMocks.from).toHaveBeenCalledWith("messages");
-    expect(supabaseMocks.insert).toHaveBeenCalledWith({
-      content,
-      user_id: userId,
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith("create_message", {
+      p_content: content,
     });
+  });
+
+  it("surfaces the database daily-limit rejection", async () => {
+    supabaseMocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "本日の新規投稿上限に達しました。" },
+    });
+
+    await expect(createMessageAction("今日の投稿")).rejects.toThrow(
+      "本日の新規投稿上限に達しました。",
+    );
   });
 
   it("rejects empty and over-limit posts before contacting Supabase", async () => {
@@ -66,6 +70,17 @@ describe("message server actions", () => {
     ).rejects.toThrow("返信は200文字以内で入力してください。");
 
     expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the database daily reply-limit rejection", async () => {
+    supabaseMocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "本日の返信上限に達しました。" },
+    });
+
+    await expect(
+      createMessageReplyAction(messageId, "今日の返信"),
+    ).rejects.toThrow("本日の返信上限に達しました。");
   });
 
   it("validates and trims reply content before passing it to the database", async () => {

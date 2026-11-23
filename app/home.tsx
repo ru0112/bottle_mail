@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { createMessageAction } from "@/app/actions/messages";
+import {
+  DAILY_MESSAGE_LIMIT,
+  getRemainingDailyActions,
+} from "@/lib/daily-message-limits";
+import type { DailyMessageUsage } from "@/lib/daily-message-limits";
 import { getRandomMessage } from "@/lib/messages";
 import type { ReceivedMessage } from "@/lib/messages";
 import {
@@ -15,6 +20,7 @@ import {
 import { getSupabaseClient } from "@/lib/supabase/client";
 
 type HomeProps = {
+  dailyUsage: DailyMessageUsage | null;
   isAuthenticated: boolean;
   supabaseConfigured: boolean;
 };
@@ -24,6 +30,7 @@ function errorMessage(error: unknown): string {
 }
 
 export default function Home({
+  dailyUsage: initialDailyUsage,
   isAuthenticated,
   supabaseConfigured,
 }: HomeProps) {
@@ -35,10 +42,28 @@ export default function Home({
   const [isReceiving, setIsReceiving] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hasPosted, setHasPosted] = useState(false);
+  const [optimisticPostResetAt, setOptimisticPostResetAt] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
   const contentLength = getMessageLength(content);
   const contentValidationError = getMessageValidationError(content);
+  const remainingPosts = initialDailyUsage
+    ? getRemainingDailyActions(
+        initialDailyUsage.message_count +
+          Number(optimisticPostResetAt === initialDailyUsage.resets_at),
+      )
+    : null;
+
+  useEffect(() => {
+    if (remainingPosts !== 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => router.refresh(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [remainingPosts, router]);
 
   async function handleSignOut() {
     setError(null);
@@ -69,7 +94,8 @@ export default function Home({
       isSending ||
       isReceiving ||
       !supabaseConfigured ||
-      !isAuthenticated
+      !isAuthenticated ||
+      remainingPosts === 0
     ) {
       return;
     }
@@ -84,10 +110,12 @@ export default function Home({
       await createMessageAction(content);
     } catch (caughtError) {
       setError(`メッセージを保存できませんでした。${errorMessage(caughtError)}`);
+      router.refresh();
       setIsSending(false);
       return;
     }
 
+    setOptimisticPostResetAt(initialDailyUsage?.resets_at ?? null);
     setContent("");
     setHasPosted(true);
     setIsSending(false);
@@ -199,6 +227,12 @@ export default function Home({
             </div>
 
             <form onSubmit={handleSubmit}>
+              {initialDailyUsage && (
+                <p className="mb-4 text-xs text-cyan-100/70" role="status">
+                  本日の新規投稿: 残り {remainingPosts}/{DAILY_MESSAGE_LIMIT}
+                  回（JST 0時にリセット）
+                </p>
+              )}
               <label className="sr-only" htmlFor="message">
                 流すメッセージ
               </label>
@@ -267,11 +301,14 @@ export default function Home({
                   isReceiving ||
                   !supabaseConfigured ||
                   !isAuthenticated ||
+                  remainingPosts === 0 ||
                   contentValidationError !== null
                 }
                 className="send-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl px-5 py-4 text-sm font-semibold tracking-[0.12em] text-slate-950 transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                {isSending
+                {remainingPosts === 0
+                  ? "本日の新規投稿上限に達しました"
+                  : isSending
                   ? "瓶に手紙を詰めています..."
                   : isReceiving
                     ? "手紙を探しています..."

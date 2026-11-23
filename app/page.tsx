@@ -1,13 +1,21 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
 import Home from "./home";
+import { getDailyMessageUsage } from "@/lib/daily-message-limits";
+import type { DailyMessageUsage } from "@/lib/daily-message-limits";
 import { isAuthSessionMissingError } from "@/lib/supabase/auth-errors";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default function HomePage() {
   if (!isSupabaseConfigured()) {
-    return <Home isAuthenticated={false} supabaseConfigured={false} />;
+    return (
+      <Home
+        dailyUsage={null}
+        isAuthenticated={false}
+        supabaseConfigured={false}
+      />
+    );
   }
 
   return (
@@ -27,6 +35,7 @@ async function AuthenticatedHome() {
   await connection();
   const supabase = await createSupabaseServerClient();
   let isAuthenticated = false;
+  let dailyUsage: DailyMessageUsage | null = null;
 
   try {
     const {
@@ -39,11 +48,20 @@ async function AuthenticatedHome() {
     }
 
     isAuthenticated = Boolean(user);
+    if (user) {
+      dailyUsage = await getDailyMessageUsage(supabase);
+    }
   } catch (error) {
     if (!isAuthSessionMissingError(error)) {
       throw error;
     }
   }
 
-  return <Home isAuthenticated={isAuthenticated} supabaseConfigured />;
+  return (
+    <Home
+      dailyUsage={dailyUsage}
+      isAuthenticated={isAuthenticated}
+      supabaseConfigured
+    />
+  );
 }

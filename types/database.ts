@@ -69,6 +69,20 @@ export type Database = {
         };
         Returns: undefined;
       };
+      create_message: {
+        Args: {
+          p_content: string;
+        };
+        Returns: undefined;
+      };
+      get_daily_message_usage: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          message_count: number;
+          reply_count: number;
+          resets_at: string;
+        }>;
+      };
       get_message_thread: {
         Args: {
           p_message_id: string;

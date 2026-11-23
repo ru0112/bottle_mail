@@ -30,9 +30,9 @@ export async function createMessageAction(content: string): Promise<void> {
     throw new Error("メッセージを流すにはログインが必要です。");
   }
 
-  const { error } = await supabase
-    .from("messages")
-    .insert({ content: validatedContent, user_id: user.id });
+  const { error } = await supabase.rpc("create_message", {
+    p_content: validatedContent,
+  });
 
   if (error) {
     throw new Error(error.message);
