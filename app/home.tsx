@@ -4,8 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { createMessage, getRandomMessage } from "@/lib/messages";
+import { createMessageAction } from "@/app/actions/messages";
+import { getRandomMessage } from "@/lib/messages";
 import type { ReceivedMessage } from "@/lib/messages";
+import {
+  getMessageLength,
+  getMessageValidationError,
+  MAX_MESSAGE_LENGTH,
+} from "@/lib/message-validation";
 import { getSupabaseClient } from "@/lib/supabase/client";
 
 type HomeProps = {
@@ -31,6 +37,8 @@ export default function Home({
   const [hasPosted, setHasPosted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
+  const contentLength = getMessageLength(content);
+  const contentValidationError = getMessageValidationError(content);
 
   async function handleSignOut() {
     setError(null);
@@ -57,6 +65,7 @@ export default function Home({
 
     if (
       !message ||
+      contentValidationError ||
       isSending ||
       isReceiving ||
       !supabaseConfigured ||
@@ -72,7 +81,7 @@ export default function Home({
     setIsSending(true);
 
     try {
-      await createMessage(message);
+      await createMessageAction(content);
     } catch (caughtError) {
       setError(`メッセージを保存できませんでした。${errorMessage(caughtError)}`);
       setIsSending(false);
@@ -208,10 +217,20 @@ export default function Home({
                 }
                 className="message-input w-full resize-y rounded-2xl border border-white/10 bg-slate-950/35 p-4 text-sm leading-7 text-white outline-none transition placeholder:text-slate-400/45 focus:border-cyan-200/45 focus:ring-2 focus:ring-cyan-200/10 disabled:opacity-50"
               />
-              <div className="mt-2 flex justify-between text-[11px] text-slate-300/45">
+              <div className="mt-2 flex justify-between gap-3 text-[11px] text-slate-300/45">
                 <span>個人情報や、誰かを傷つける言葉は入力しないでください</span>
-                <span>{content.length}字</span>
+                <span aria-live="polite">
+                  {contentLength} / {MAX_MESSAGE_LENGTH}字
+                </span>
               </div>
+              {contentValidationError && (
+                <p
+                  className="mt-2 text-xs text-rose-100/85"
+                  role="status"
+                >
+                  {contentValidationError}
+                </p>
+              )}
 
               {!supabaseConfigured && (
                 <p
@@ -248,7 +267,7 @@ export default function Home({
                   isReceiving ||
                   !supabaseConfigured ||
                   !isAuthenticated ||
-                  content.trim().length === 0
+                  contentValidationError !== null
                 }
                 className="send-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl px-5 py-4 text-sm font-semibold tracking-[0.12em] text-slate-950 transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
               >

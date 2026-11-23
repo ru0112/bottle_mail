@@ -4,8 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { createMessageReply } from "@/lib/messages";
+import { createMessageReplyAction } from "@/app/actions/messages";
 import type { MessageThreadEntry } from "@/lib/messages";
+import {
+  getMessageLength,
+  getMessageValidationError,
+  MAX_MESSAGE_LENGTH,
+} from "@/lib/message-validation";
 import { canPostReply } from "@/lib/thread-rules";
 
 type MessageThreadProps = {
@@ -25,18 +30,20 @@ export default function MessageThread({ entries }: MessageThreadProps) {
   const replyCount = entries.length - 1;
   const lastEntry = entries[entries.length - 1];
   const canReply = canPostReply(replyCount, lastEntry.speaker);
+  const contentLength = getMessageLength(content);
+  const contentValidationError = getMessageValidationError(content, "返信");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmedContent = content.trim();
-    if (!canReply || !trimmedContent || isSending) {
+    if (!canReply || !trimmedContent || contentValidationError || isSending) {
       return;
     }
 
     setError(null);
     setIsSending(true);
     try {
-      await createMessageReply(messageId, trimmedContent);
+      await createMessageReplyAction(messageId, content);
       setContent("");
       router.refresh();
     } catch (caughtError) {
@@ -142,6 +149,16 @@ export default function MessageThread({ entries }: MessageThreadProps) {
                 disabled={isSending}
                 className="w-full resize-y rounded-xl border border-white/10 bg-slate-950/35 p-4 text-sm leading-7 text-white outline-none transition placeholder:text-slate-400/45 focus:border-cyan-200/45 focus:ring-2 focus:ring-cyan-200/10 disabled:opacity-50"
               />
+              <div className="mt-2 flex justify-end text-[11px] text-slate-300/55">
+                <span aria-live="polite">
+                  {contentLength} / {MAX_MESSAGE_LENGTH}字
+                </span>
+              </div>
+              {contentValidationError && (
+                <p className="mt-2 text-xs text-rose-100/85" role="status">
+                  {contentValidationError}
+                </p>
+              )}
               {error && (
                 <p
                   className="mt-4 rounded-xl border border-rose-200/20 bg-rose-100/[0.06] px-4 py-3 text-xs leading-6 text-rose-100/90"
@@ -156,7 +173,9 @@ export default function MessageThread({ entries }: MessageThreadProps) {
                 </span>
                 <button
                   type="submit"
-                  disabled={isSending || !content.trim() || !canReply}
+                  disabled={
+                    isSending || Boolean(contentValidationError) || !canReply
+                  }
                   className="send-button rounded-xl px-5 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {isSending ? "返信を送信中..." : "返信する"}
